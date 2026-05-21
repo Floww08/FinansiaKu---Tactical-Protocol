@@ -221,51 +221,75 @@ export default function DashboardPage() {
         return () => { if (assetChartInstance.current) assetChartInstance.current.destroy(); }
     }, [allocCrypto, allocSaham, activeView, isDataLoaded]);
 
+    // NLP OCR TERBARU (ANTI-GOBLOK)
     const extractTransactionData = (rawText) => {
         let amount = 0;
+        let type = "expense";
+        let cat = "Lain-lain";
+
         const cleanText = rawText.toLowerCase().replace(/rp\s?/g, '').replace(/,/g, '.');
-        
-        const regexStandard = /(?<!\d)(\d{1,3}(?:\.\d{3})+)(?!\d)/; 
-        const regexJt = /(?<!\d)(\d+(?:\.\d+)?)\s*(jt|juta|m)\b/i;  
-        const regexK = /(?<!\d)(\d+(?:\.\d+)?)\s*(k|rb|ribu)\b/i;   
-        const regexPlain = /(?<!\d)(\d{4,})(?!\d)/;                 
 
-        if (regexStandard.test(cleanText)) {
-            amount = parseInt(cleanText.match(regexStandard)[1].replace(/\./g, ''));
-        } else if (regexJt.test(cleanText)) {
-            amount = parseFloat(cleanText.match(regexJt)[1]) * 1000000;
-        } else if (regexK.test(cleanText)) {
-            amount = parseFloat(cleanText.match(regexK)[1]) * 1000;
-        } else if (regexPlain.test(cleanText)) {
-            amount = parseInt(cleanText.match(regexPlain)[1]);
-        }
+        // 1. Deteksi apakah ini dari nota belanja
+        const isReceipt = /total|tunai|kembali|struk|nota|kasir|pajak|change|cash/i.test(cleanText);
 
-        if (amount === 0) {
-            const nums = cleanText.match(/\d+/g);
-            if (nums) amount = Math.max(...nums.map(n => parseInt(n) || 0));
-        }
+        // Kumpulkan semua angka logis (minimal ribuan)
+        const allNumbers = [...cleanText.matchAll(/(?<!\d)(\d{1,3}(?:\.\d{3})+)(?!\d)|(?<!\d)(\d{4,})(?!\d)/g)]
+            .map(m => parseInt((m[1] || m[2]).replace(/\./g, '')))
+            .filter(n => !isNaN(n) && n > 0);
 
-        let type = "expense", cat = "Lain-lain";
-        const isIncome = /gaji|masuk|terima|profit|cair|topup|dapat|saku|jual|tarik/i.test(cleanText);
-        
-        if (isIncome) { 
-            type = 'income'; 
-            if (/emas|crypto|saham|aset|bitcoin|btc/i.test(cleanText)) {
-                cat = "Pencairan Aset";
-            } else {
-                cat = incomeCategories[0]; 
+        if (isReceipt) {
+            type = 'expense'; // Jika nota, PAKSA JADI PENGELUARAN (-)
+
+            // Strategi A: Cari pola "Total xxxxx"
+            const totalMatch = cleanText.match(/(?:total|jumlah|grand total|subtotal)[\s\S]{0,20}?(\d{1,3}(?:\.\d{3})+|\d{4,})/i);
+            
+            if (totalMatch) {
+                amount = parseInt(totalMatch[1].replace(/\./g, ''));
+            } 
+            // Strategi B: Jika kata "Total" buram/tidak terbaca OCR
+            else if (allNumbers.length > 0) {
+                const sorted = allNumbers.sort((a,b) => b-a);
+                // Angka paling besar biasanya uang kembalian bayar (misal bayar 100rb, total 75rb)
+                if (cleanText.includes('kembali') && sorted.length >= 2) {
+                    amount = sorted[1]; // Ambil angka terbesar kedua
+                } else {
+                    amount = sorted[0]; // Ambil yang paling besar
+                }
             }
-        } else { 
-            if (/makan|minum|kopi|rokok|bensin|gojek|grab|indomaret|alfamart|superindo|warteg|resto|struk/i.test(cleanText)) {
+        } else {
+            // 2. Logika ketik manual
+            const regexJt = /(?<!\d)(\d+(?:\.\d+)?)\s*(jt|juta|m)\b/i;  
+            const regexK = /(?<!\d)(\d+(?:\.\d+)?)\s*(k|rb|ribu)\b/i;   
+
+            if (regexJt.test(cleanText)) {
+                amount = parseFloat(cleanText.match(regexJt)[1]) * 1000000;
+            } else if (regexK.test(cleanText)) {
+                amount = parseFloat(cleanText.match(regexK)[1]) * 1000;
+            } else if (allNumbers.length > 0) {
+                amount = allNumbers[0]; // Ambil angka pertama aja
+            }
+
+            // Cek pemasukan
+            const isIncome = /gaji|masuk|terima|profit|cair|topup|dapat|saku|jual|tarik/i.test(cleanText);
+            if (isIncome && !/bayar|beli|keluar|potong/i.test(cleanText)) {
+                type = 'income';
+            }
+        }
+
+        // 3. Kategorisasi cerdas
+        if (type === 'income') {
+            if (/emas|crypto|saham|aset|bitcoin|btc/i.test(cleanText)) cat = "Pencairan Aset";
+            else cat = incomeCategories[0] || "Lain-lain";
+        } else {
+            if (/makan|minum|kopi|rokok|bensin|gojek|grab|indomaret|alfamart|superindo|warteg|resto|struk|nota|total/i.test(cleanText)) {
                 cat = budgets.find(b => /pokok|makan|harian/i.test(b.category))?.category || budgets[0]?.category;
             } else if (/listrik|air|wifi|internet|token|pajak|pln|pdam/i.test(cleanText)) {
                 cat = budgets.find(b => /tagihan|bulanan/i.test(b.category))?.category || budgets[2]?.category;
             } else if (/kereta|tiket|pesawat|bus|tol|parkir/i.test(cleanText)) {
                 cat = budgets.find(b => /transportasi|jalan/i.test(b.category))?.category || budgets[1]?.category;
             } else {
-                budgets.forEach(b => { if (new RegExp(b.category.split(" ")[0], "i").test(cleanText)) cat = b.category; }); 
+                cat = budgets[0]?.category || "Pengeluaran";
             }
-            if (!cat) cat = budgets[0]?.category || "Pengeluaran";
         }
 
         return { amount, type, category: cat };
@@ -276,7 +300,7 @@ export default function DashboardPage() {
         if (!aiInput) return;
         
         const extracted = extractTransactionData(aiInput);
-        if (extracted.amount <= 0) return alert('Gagal membaca nominal angka. Coba ketik lebih jelas.');
+        if (extracted.amount <= 0) return alert('Gagal membaca nominal angka. Coba ketik lebih jelas atau foto ulang.');
 
         let desc = aiInput.length > 30 ? aiInput.substring(0, 30) + '...' : aiInput;
         desc = '[AI] ' + desc.replace(/\n/g, ' ');
@@ -294,14 +318,13 @@ export default function DashboardPage() {
         }
     };
 
-    // FUNGSI PREPROCESSING GAMBAR SEBELUM DIBACA AI
+    // Preprocessing Gambar
     const handleOpticScan = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
 
         setIsOpticScanning(true);
         try {
-            // Ubah gambar ke Canvas untuk meningkatkan kontras (Binarization)
             const processedImageURL = await new Promise((resolve) => {
                 const img = new Image();
                 img.onload = () => {
@@ -314,13 +337,12 @@ export default function DashboardPage() {
                     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                     const data = imageData.data;
 
-                    // Mengubah gambar jadi hitam putih kontras tinggi
                     for (let i = 0; i < data.length; i += 4) {
                         const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                        const threshold = avg < 130 ? 0 : 255; // 130 adalah batas abu-abu
-                        data[i] = threshold;     // Red
-                        data[i + 1] = threshold; // Green
-                        data[i + 2] = threshold; // Blue
+                        const threshold = avg < 130 ? 0 : 255; 
+                        data[i] = threshold;     
+                        data[i + 1] = threshold; 
+                        data[i + 2] = threshold; 
                     }
                     ctx.putImageData(imageData, 0, 0);
                     resolve(canvas.toDataURL('image/png'));
@@ -585,7 +607,6 @@ export default function DashboardPage() {
                                         const profit = val - a.buy;
                                         const pct = a.buy > 0 ? ((profit / a.buy) * 100).toFixed(2) : 0;
                                         
-                                        // PISAHKAN LOGIKA WARNA DARI JSX AGAR TIDAK ERROR BUILD
                                         const isProfit = profit >= 0;
                                         const badgeBg = isProfit ? 'rgba(0, 240, 255, 0.1)' : 'rgba(255, 42, 42, 0.1)';
                                         const badgeColor = isProfit ? 'var(--blue)' : 'var(--rose)';
@@ -692,7 +713,7 @@ export default function DashboardPage() {
                                 <label>NEW DISPLAY NAME</label>
                                 <input type="text" value={newUsername} onChange={(e)=>setNewUsername(e.target.value)} required placeholder="Ketik nama baru..." className="uppercase font-mono w-full p-2 border bg-black text-white" />
                             </div>
-                            <button type="submit" className="btn-main bg-gradient-blue text-white w-full hover-float font-mono text-lg font-bold">SAVE CHAGES</button>
+                            <button type="submit" className="btn-main bg-gradient-blue text-white w-full hover-float font-mono text-lg font-bold">SAVE CHANGES</button>
                         </form>
                     </div>
                 </div>
