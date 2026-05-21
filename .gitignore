@@ -1,0 +1,10 @@
+# Mengabaikan folder berat
+node_modules
+.next
+out
+build
+
+# Mengabaikan konfigurasi lokal/sensitif
+.env*.local
+.firebase
+.DS_Store
