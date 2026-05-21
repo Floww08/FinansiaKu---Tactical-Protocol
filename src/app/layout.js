@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "FinansiaKu - Tactical Protocol",
+  title: "FinansialKu - Tactical Protocol",
   description: "Advanced Financial Management System V6.2",
   icons: {
     icon: '/favicon.svg', 
